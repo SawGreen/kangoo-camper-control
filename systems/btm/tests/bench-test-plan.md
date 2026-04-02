@@ -1,186 +1,153 @@
-# BTM bench test plan — 4× ADS1115 + 16× NTC (4P4S)
+# BTM Bench Test Plan (Tomorrow Bring-Up)
 
-Datum testu: 2026-04-03  
-Cíl: Ověřit měřicí řetězec BTM na stole (I2C → ADS1115 → 16 kanálů → odpor → teplota → Serial log) a rychle odhalit chyby v zapojení / adresách / přepočtech.
+## 1) Purpose
 
-Kontext:
-- BTM baseline v repo: ESP32 + 4× ADS1115 + 16× B3950 10k NTC + 16× 10k 1% rezistor (viz ADR-001).  
-- Tento bench test je „ošklivý, ale účelový“: teď chceme čísla, ne finální architekturu.
+This bench test verifies the basic measurement chain only:
+- ESP32 I2C bring-up
+- 4x ADS1115 detection
+- 16x channel sampling
+- raw ADC to voltage
+- voltage to NTC resistance
+- resistance to temperature (Beta model)
+- readable Serial output with simple flags
 
----
+This is a practical bench test, not production integration.
 
-## Scope bench firmwaru (MUST)
+## 2) In Scope
 
-Firmware pro bench test dělá pouze:
-- inicializace I2C (Wire.begin + clock)
-- detekce 4× ADS1115 na I2C (adresy a počet)
-- čtení všech 16 kanálů (4 ADS × 4 single-ended)
-- přepočet ADC raw → napětí
-- přepočet napětí → odpor NTC (dle orientace děliče)
-- přepočet odpor → teplota (Beta model, B=3950, R25=10k; případně později Steinhart–Hart)
-- výpis tabulky do Serial
-- jednoduché flagy:
-  - sensor_missing
-  - out_of_range
-  - adc_read_fail
+Bench firmware should do only this:
+- Initialize Serial and I2C.
+- Detect ADS1115 devices at configured addresses.
+- Read all 16 single-ended channels.
+- Convert `raw -> volts -> ohms -> degrees C`.
+- Print one readable table to Serial.
+- Set per-channel flags:
+  - `sensor_missing`
+  - `out_of_range`
+  - `adc_read_fail`
 
----
+## 3) Out of Scope
 
-## Out of scope (MUST NOT)
+Explicitly not part of this task:
+- Production architecture changes
+- Wi-Fi/network features
+- Webserver/GUI/UI
+- Persistent config/calibration storage
+- Message bus or MCS integration
+- Final system integration patterns
 
-Do bench firmwaru teď nepatří:
-- fancy architektura / modulární framework
-- MCS / message model / transport / heartbeat
-- GUI / HMI / webserver / Wi‑Fi
-- persistent config / filesystem
-- finální „production“ logging/telemetry formát
+## 4) Minimum Hardware
 
----
+Required:
+- 1x ESP32-WROOM-32 class dev board (USB-C, CH340C)
+- 4x generic ADS1115 modules
+- 16x NTC 10k B3950
+- 16x fixed resistor 10k (1% recommended)
+- Jumpers, breadboard/terminal block
+- USB data cable (not charge-only)
 
-## Bench hardware (minimum)
+Recommended:
+- Multimeter
+- Labels for channel IDs
+- Mild heat source for one-sensor response check
 
-Povinné:
-- ESP32 (dev board) + USB kabel
-- 4× ADS1115 moduly
-- 16× NTC B3950 10k (podle repo baseline)
-- 16× 10k 1% rezistor (podle repo baseline)
-- breadboard / svorky / jumpery
-- stabilní 3.3 V napájení pro ADC + děliče (doporučeno pro kompatibilní I2C úrovně)
-- (volitelné, ale praktické) multimetr
+## 5) Practical Step-by-Step Procedure
 
-Doporučené:
-- teploměr nebo IR teploměr pro sanity-check
-- horký vzduch / prst pro lokální ohřev jednoho senzoru
-- štítky / fix na značení kanálů
+### Step A: Wiring Check
+1. Wire per `systems/btm/hardware/wiring-notes.md`.
+2. Confirm shared GND between ESP32 and all ADS modules.
+3. Confirm unique ADS addresses: `0x48, 0x49, 0x4A, 0x4B`.
+4. Confirm divider orientation in hardware matches firmware config.
 
----
+### Step B: IDE + Upload
+1. Follow `systems/btm/tests/bench-setup-requirements.md`.
+2. Select board `ESP32 Dev Module`.
+3. Upload firmware and open Serial Monitor at `115200`.
 
-## Praktická bench topologie
+### Step C: Startup Checks
+1. Confirm startup prints I2C configuration.
+2. Confirm startup prints expected ADS addresses and detected count.
+3. If any ADS is missing, stop and fix wiring/address straps first.
 
-Preferovaná:
-- NTC + 10k rezistory fyzicky v packu nebo v jeho bezprostřední blízkosti
-- ADS1115 co nejblíž děličům (krátké analogové vedení)
-- ESP32 externě (snadné ladění, nepřekáží u pack build)
+### Step D: Readout Checks
+1. Wait for table output.
+2. Confirm all global channels 0..15 are listed.
+3. Confirm channels on missing ADS devices show `adc_read_fail=1`.
 
-Poznámka: dlouhé analogové vedení od NTC k ADC není ideální. Pro zítřek hlavně ať to běží a je to měřitelné.
+### Step E: Sanity Temperature Check
+1. At room conditions, verify values are plausible.
+2. Warm exactly one sensor.
+3. Confirm that channel changes clearly and others stay mostly stable.
 
----
+### Step F: Fault Flag Check
+1. Disconnect one sensor path; confirm `sensor_missing=1`.
+2. Create known invalid condition (near rail input) and confirm missing/fault behavior.
+3. Push one sensor outside temp limits (if practical) to confirm `out_of_range=1`.
 
-## Pass / fail kritéria
+### Step G: Log the Session
+1. Fill Pack Build Log.
+2. Fill BMS Comparison Log (if BMS/reference readings exist).
+3. Fill BTM Bench Log with channel-level observations.
 
-PASS, pokud:
-1) I2C se inicializuje bez pádu a firmware vypíše konfiguraci (SDA/SCL, I2C freq).  
-2) Detekují se přesně 4 ADS1115 (ne 3, ne 5).  
-3) Je možné číst všech 16 kanálů opakovaně (bez „adc_read_fail“).  
-4) Při pokojové teplotě dávají všechny kanály teploty přibližně v realistickém rozsahu (typicky ~18–30 °C podle prostředí).  
-5) Při ohřátí jednoho konkrétního NTC (prst / teplý vzduch) se:
-   - jeho kanál viditelně změní (řádově aspoň několik °C)
-   - ostatní kanály zůstanou relativně stabilní (malé drift/jitter ok)
+## 6) Pass/Fail Criteria
 
-FAIL, pokud:
-- ADS1115 nejsou detekované / detekuje se špatný počet
-- některé kanály nejdou číst (adc_read_fail)
-- převod dává nerealistické teploty (např. -200 °C, 500 °C) při běžném zapojení
-- „sensor_missing“ nejde vyvolat odpojením senzoru
-- data jsou zjevně přeházená (kanál 0 reaguje na jiný fyzický senzor než si myslíš) a nemáš to zdokumentované
+PASS if all are true:
+- Firmware starts and prints config info.
+- Exactly four ADS1115 devices are detected.
+- 16 channels print repeatedly.
+- Conversion values are plausible for bench conditions.
+- Flags react as expected during basic fault checks.
 
----
+FAIL if any are true:
+- I2C does not start reliably.
+- ADS count is not 4.
+- Channel data cannot be read repeatedly.
+- Values are clearly non-physical for normal bench temperature.
+- Flags do not react to simple injected faults.
 
-## Procedura testu krok za krokem
+## 7) Manual Logging Templates
 
-### Příprava
-1) Zkontroluj fyzické zapojení podle `systems/btm/hardware/wiring-notes.md`.
-2) Ověř, že všechny GND jsou společné (ESP32 ↔ ADS ↔ děliče).
-3) Ověř, že ADS1115 jsou napájené správným napětím (doporučeně 3.3 V).
+## Pack Build Log
+- Date:
+- Operator:
+- Board serial/port:
+- ADS module labels:
+- Divider orientation:
+- Sensor label map used:
+- Wiring notes/deviations:
+- Issues found:
+- Fix applied:
 
-### Flash a první běh
-1) Nahraj firmware `systems/btm/firmware/benchtest_ads1115_ntc/` do ESP32.
-2) Otevři Serial monitor (115200).
-3) Zkontroluj startovní výpis:
-   - I2C init OK
-   - detekce ADS a jejich adresy
-   - start periodického výpisu tabulky
+## BMS Comparison Log
+- Date:
+- BMS / reference instrument:
 
-### Validace I2C a 4× ADS1115
-1) Ověř, že firmware hlásí nalezené adresy 0x48–0x4B (nebo ty, které jsi fyzicky nastavil).
-2) Pokud chybí zařízení:
-   - ověř ADDR pin toho modulu
-   - ověř SDA/SCL prohození
-   - ověř pull-upy / napájení
+| Group/Cell ID | BMS Voltage (V) | Bench Voltage (V) | Delta (mV) | Notes |
+|---|---:|---:|---:|---|
+|   |   |   |   |   |
+|   |   |   |   |   |
+|   |   |   |   |   |
 
-### Čtení 16 kanálů
-1) Sleduj tabulku kanálů 0–15:
-   - raw ADC
-   - V
-   - R_ohm
-   - T_C
-   - flagy
-2) Hledej:
-   - „zaseklé“ kanály (raw se nikdy nemění)
-   - kanály mimo smysl (V blízko 0 nebo Vcc)
-   - výpadky (adc_read_fail)
+## BTM Bench Log
+- Date:
+- Firmware commit:
+- Ambient estimate (C):
 
-### Sanity-check teploty
-1) Nech systém ustálit 30–60 s.
-2) Vyber *jeden* kanál a ohřej NTC (prst / teplý vzduch).
-3) Očekávání:
-   - T_C toho kanálu jde nahoru
-   - ostatní kanály se hýbou minimálně
-
-### Fault injection (flagy)
-1) Odpoj jeden NTC vodič (simulace „sensor missing“):
-   - očekávej `sensor_missing=1`
-2) Zkrať vstup děliče na GND nebo VCC (simulace short/open):
-   - očekávej `sensor_missing=1`
-3) Pokud máš nastavené temp limity:
-   - ohřej / ochlaď tak, aby se dostalo mimo rozsah → `out_of_range=1`
-
----
-
-## Mermaid flowchart (procedura)
-
-```mermaid
-flowchart TD
-  A[Zapoj HW] --> B[Power + společná GND]
-  B --> C[Flash bench firmware]
-  C --> D[Serial monitor: start log]
-  D --> E{I2C init OK?}
-  E -- ne --> E1[Opravit SDA/SCL/power/pull-upy] --> C
-  E -- ano --> F{Nalezeny 4× ADS1115?}
-  F -- ne --> F1[Opravit ADDR/adresy/I2C link] --> C
-  F -- ano --> G[Čti 16 kanálů]
-  G --> H{adc_read_fail?}
-  H -- ano --> H1[I2C stabilita/power/rušení] --> C
-  H -- ne --> I[Přepočet V→R→T]
-  I --> J{Teploty realistické?}
-  J -- ne --> J1[Ověřit orientaci děliče + Vcc + Rfixed + Beta] --> C
-  J -- ano --> K[Ohřát 1 senzor]
-  K --> L{Reakce jen na správném kanálu?}
-  L -- ne --> L1[Opravit mapování kanálů / kabeláž] --> C
-  L -- ano --> M[Zdokumentovat bench log + závěry]
-
-  ```
-
-## Referenční sanity tabulka (B3950, R25=10k, Rfixed=10k, Vcc=3.3 V, ADS FS=±4.096 V)
-Pozn.: Výsledek napětí a raw závisí na orientaci děliče.
-
-Teplota	R_NTC (ohm)	Vout (Rfixed top, NTC bottom)	Raw @FS=4.096V	Vout (NTC top, Rfixed bottom)	Raw @FS=4.096V
-25 °C	~10000	~1.650 V	~13200	~1.650 V	~13200
-40 °C	~5300	~1.143 V	~9147	~2.157 V	~17253
-
-## Co z bench testu uložit (aby to nebylo jen „vypadalo to dobře“)
-
-**Pack build log (šablona)**
-
-- Datum:
-- Konfigurace: 4P4S
-- Typ článků:
-- Způsob uchycení NTC (popis + foto):
-- Rozmístění senzorů / ID:
-- Poznámky (mechanika, izolace, vedení kabelů):
-
-**- **BMS comparison log (šablona)**
-- Cell / group ID	BMS napětí (V)	Externí měření (V)	Rozdíl (mV)	Poznámka
-
-**BTM bench log (šablona)**
-- ADS addr	Channel (AIN0-3)	Global ID (0-15)	Raw	V	R (ohm)	T (°C)	sensor_missing	out_of_range  
+| ADS Addr | AIN | CH | Raw | Voltage (V) | NTC (ohm) | Temp (C) | sensor_missing | out_of_range | adc_read_fail | Notes |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| 0x48 | AIN0 | 0  |  |  |  |  |  |  |  |  |
+| 0x48 | AIN1 | 1  |  |  |  |  |  |  |  |  |
+| 0x48 | AIN2 | 2  |  |  |  |  |  |  |  |  |
+| 0x48 | AIN3 | 3  |  |  |  |  |  |  |  |  |
+| 0x49 | AIN0 | 4  |  |  |  |  |  |  |  |  |
+| 0x49 | AIN1 | 5  |  |  |  |  |  |  |  |  |
+| 0x49 | AIN2 | 6  |  |  |  |  |  |  |  |  |
+| 0x49 | AIN3 | 7  |  |  |  |  |  |  |  |  |
+| 0x4A | AIN0 | 8  |  |  |  |  |  |  |  |  |
+| 0x4A | AIN1 | 9  |  |  |  |  |  |  |  |  |
+| 0x4A | AIN2 | 10 |  |  |  |  |  |  |  |  |
+| 0x4A | AIN3 | 11 |  |  |  |  |  |  |  |  |
+| 0x4B | AIN0 | 12 |  |  |  |  |  |  |  |  |
+| 0x4B | AIN1 | 13 |  |  |  |  |  |  |  |  |
+| 0x4B | AIN2 | 14 |  |  |  |  |  |  |  |  |
+| 0x4B | AIN3 | 15 |  |  |  |  |  |  |  |  |

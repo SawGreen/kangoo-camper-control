@@ -1,132 +1,105 @@
+# BTM Wiring Notes (Bench-Focused)
 
-# BTM wiring notes — ESP32 + 4× ADS1115 + 16× NTC (bench)
+This note is only for practical bench wiring with:
+- 1x ESP32-WROOM-32 class dev board (USB-C, CH340C)
+- 4x generic ADS1115 modules
+- 16x 10k B3950 NTC sensors
+- 16x fixed 10k resistors
 
-Tento dokument je praktická „wiring realita“ pro bench test.
-Cíl: aby šlo rychle zkontrolovat pinout, adresy, napájení a správný vzorec pro dělič.
+## 1) ESP32 I2C Defaults for Bench Bring-Up
 
----
+For Arduino target `ESP32 Dev Module`, use:
+- `SDA = GPIO21`
+- `SCL = GPIO22`
 
-## I2C sběrnice
+Recommended first bring-up I2C frequency:
+- `100000 Hz` (conservative and usually stable)
 
-Společné signály pro všechny 4× ADS1115:
-- SDA (data)
-- SCL (clock)
-- GND (společná zem)
-- VDD (napájení ADC)
+After basic success, `400000 Hz` can be tried if wiring is short and clean.
 
-Poznámka k pull-upům:
-- Většina ADS1115 breakoutů už pull-upy má.
-- Se 4 moduly se pull-upy paralelně zmenší (větší proud). Pokud je sběrnice nestabilní, zvaž:
-  - odpojit některé pull-upy na modulech, nebo
-  - řídit se jedním párem (např. 4.7k–10k) pro celou sběrnici.
+## 2) ADS1115 Address Selection
 
----
+ADS1115 address depends on ADDR pin strap:
+- `ADDR -> GND` = `0x48`
+- `ADDR -> VDD` = `0x49`
+- `ADDR -> SDA` = `0x4A`
+- `ADDR -> SCL` = `0x4B`
 
-## ESP32 SDA/SCL piny
+## 3) Recommended 4-Device Address Plan
 
-Repo aktuálně nespecifikuje konkrétní ESP32 variantu ani pin mapping (ADR-001 to explicitně nechává otevřené).  
-Bench firmware skeleton používá výchozí mapping pro běžný ESP32 DevKit:
+Use one module per address:
+- ADS #0: `0x48`
+- ADS #1: `0x49`
+- ADS #2: `0x4A`
+- ADS #3: `0x4B`
 
-- SDA: GPIO21
-- SCL: GPIO22
+This matches the firmware defaults.
 
-Pokud používáš jiný board (ESP32-S3 apod.), uprav to v `systems/btm/firmware/benchtest_ads1115_ntc/include/btm_config.h`.
+## 4) Power Assumptions (Conservative)
 
----
+For this bench setup, keep all logic at 3.3 V:
+- ESP32 logic: 3.3 V
+- ADS1115 supply: 3.3 V
+- Divider supply: 3.3 V
 
-## ADS1115 I2C adresy (ADDR pin)
+Also required:
+- Common GND between ESP32 and all ADS modules.
 
-ADS1115 má 4 možné 7-bit adresy dle toho, kam připojíš pin ADDR: citeturn6search2
+Conservative warning:
+- Some generic ADS1115 boards support 5 V power, but that may affect logic-level assumptions depending on module design.
+- For tomorrow, use 3.3 V everywhere unless you have verified your exact module behavior.
 
-- ADDR → GND  => 0x48 (default)
-- ADDR → VDD  => 0x49
-- ADDR → SDA  => 0x4A
-- ADDR → SCL  => 0x4B
+## 5) NTC Divider Concept
 
-Praktická konfigurace pro 4 moduly:
-- 1. modul: ADDR na GND (0x48)
-- 2. modul: ADDR na VDD (0x49)
-- 3. modul: ADDR na SDA (0x4A)
-- 4. modul: ADDR na SCL (0x4B)
+Each channel is a 2-resistor divider measured by ADS1115:
+- One leg is NTC.
+- One leg is fixed 10k.
+- ADS reads `Vout` at the midpoint.
 
-Pozor: „ADDR → SDA/SCL“ znamená fyzicky připojit ADDR na tu linku (ne na pin ESP32), tj. přímo na I2C vodič SDA/SCL.
+Firmware then computes:
+- `ADC raw -> voltage -> NTC resistance -> temperature`.
 
----
+## 6) Valid Divider Orientations and Formulas
 
-## Napájení
+Definitions:
+- `Vcc` = divider supply
+- `Vout` = midpoint voltage
+- `Rfixed` = fixed resistor
+- `Rntc` = NTC resistance
 
-Doporučené pro bench:
-- VDD ADS1115: 3.3 V
-- Dělič NTC: 3.3 V
-- ESP32 logika: 3.3 V
+### Orientation A: NTC to VCC, fixed resistor to GND
 
-Důvod: I2C úrovně zůstanou bezpečně kompatibilní bez level-shifteru.
+`VCC -- NTC -- Vout -- Rfixed -- GND`
 
-Pokud bys ADS1115 napájel 5 V:
-- musíš řešit I2C level shifting (ESP32 není 5V tolerant), a
-- analog vstupy stále nesmí lézt mimo GND..VDD.
+Use:
+- `Rntc = Rfixed * (Vcc - Vout) / Vout`
 
----
+### Orientation B: fixed resistor to VCC, NTC to GND
 
-## Mapování kanálů (16 kanálů)
+`VCC -- Rfixed -- Vout -- NTC -- GND`
 
-Každý ADS1115 má 4 single-ended vstupy AIN0..AIN3 => 4×4 = 16 kanálů.
+Use:
+- `Rntc = Rfixed * Vout / (Vcc - Vout)`
 
-Doporučené globální mapování (firmware to takto tiskne):
-- ADS 0 (0x48): AIN0..3 => global 0..3
-- ADS 1 (0x49): AIN0..3 => global 4..7
-- ADS 2 (0x4A): AIN0..3 => global 8..11
-- ADS 3 (0x4B): AIN0..3 => global 12..15
+Both are valid. Firmware orientation must match actual wiring.
 
-Do bench logu si doplň „který global ID = který fyzický senzor“.
+## 7) Channel Mapping for All 16 Inputs
 
----
+Use this global map:
+- ADS `0x48`: AIN0->CH0, AIN1->CH1, AIN2->CH2, AIN3->CH3
+- ADS `0x49`: AIN0->CH4, AIN1->CH5, AIN2->CH6, AIN3->CH7
+- ADS `0x4A`: AIN0->CH8, AIN1->CH9, AIN2->CH10, AIN3->CH11
+- ADS `0x4B`: AIN0->CH12, AIN1->CH13, AIN2->CH14, AIN3->CH15
 
-## NTC dělič — 2 možné orientace (a vzorce)
+Label this map on the bench harness to avoid channel confusion.
 
-RT = odpor NTC  
-R = pevný rezistor (v repo baseline 10k)  
-Vcc = napájení děliče  
-Vout = napětí na uzlu (měřené ADS1115 vůči GND)
+## 8) Why ADS Boards Should Be Close to Sensors
 
-### Varianta A: R nahoře na Vcc, NTC dole na GND
+For this type of NTC divider measurement, short analog paths are helpful:
+- Less noise pickup
+- Less ground-offset error
+- Easier troubleshooting of unstable readings
 
-Schéma:
-Vcc --- R ---+--- NTC --- GND
-             |
-           Vout → ADS AINx
-
-Platí:
-- Vout = Vcc * (RT / (R + RT))
-- RT = R * Vout / (Vcc - Vout)
-
-### Varianta B: NTC nahoře na Vcc, R dole na GND
-
-Schéma:
-Vcc --- NTC ---+--- R --- GND
-               |
-             Vout → ADS AINx
-
-Platí:
-- Vout = Vcc * (R / (R + RT))
-- RT = R * (Vcc - Vout) / Vout
-
-Poznámka:
-- Obě varianty jsou OK. Jen musí sedět vzorec v kódu.
-- U 25 °C (R=10k, RT≈10k) vyjde Vout přibližně 1/2 Vcc u obou orientací.
-
----
-
-## Poznámka k dlouhému analogovému vedení
-
-Dlouhé analogové vedení mezi NTC a ADS1115 je náchylné na:
-- šum, kapacitní vazby
-- zemní smyčky a „mystery offsety“
-
-Pro zítřek: hlavně to zprovoznit a změřit.
-Dlouhodobě: ADC co nejblíž senzorům, digitální I2C dál k ESP32.
-
-Pro stabilitu může pomoct:
-- vedení analog signálů v párech se zemí
-- společný „analog ground point“ u ADS
-- (až budeš ladit šum) malý C na vstup (řádově 1–10 nF) podle potřeby
+Practical rule for tomorrow:
+- Keep divider/ADC wiring short.
+- Allow longer distance on digital lines (I2C) only if needed.
