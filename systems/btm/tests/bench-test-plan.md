@@ -22,7 +22,7 @@ Bench firmware should do only this:
 - Convert `raw -> volts -> ohms -> degrees C`.
 - Print one readable table to Serial.
 - Set per-channel flags:
-  - `sensor_missing`
+  - `sensor_missing` (simple bench fault flag for missing sensor behavior, open/short-like divider faults, and near-rail readings)
   - `out_of_range`
   - `adc_read_fail`
 
@@ -132,6 +132,11 @@ FAIL if any are true:
 - Date:
 - Firmware commit:
 - Ambient estimate (C):
+- Firmware config snapshot:
+  - Divider orientation:
+  - Beta:
+  - R25 (ohm):
+  - Temperature limits (C):
 
 | ADS Addr | AIN | CH | Raw | Voltage (V) | NTC (ohm) | Temp (C) | sensor_missing | out_of_range | adc_read_fail | Notes |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|

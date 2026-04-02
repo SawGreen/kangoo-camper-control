@@ -46,8 +46,11 @@ Also required:
 - Common GND between ESP32 and all ADS modules.
 
 Conservative warning:
-- Some generic ADS1115 boards support 5 V power, but that may affect logic-level assumptions depending on module design.
-- For tomorrow, use 3.3 V everywhere unless you have verified your exact module behavior.
+- Many generic ADS1115 modules include onboard I2C pull-up resistors.
+- If an ADS1115 module is powered at 5 V, those pull-ups may pull SDA/SCL up to 5 V.
+- ESP32 I2C pins are 3.3 V logic, so accidental 5 V pull-up exposure is a real risk.
+- Some generic ADS1115 boards support 5 V power, but behavior depends on exact module design.
+- For this bench setup, keep ADS1115 modules at 3.3 V unless the exact module design is verified.
 
 ## 5) NTC Divider Concept
 

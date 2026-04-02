@@ -22,6 +22,7 @@ struct ChannelReading {
 static Adafruit_ADS1115 g_ads[BTM_ADS_COUNT];
 static bool g_ads_ok[BTM_ADS_COUNT] = {false, false, false, false};
 static ChannelReading g_readings[BTM_CHANNEL_COUNT];
+static uint32_t g_cycle_count = 0;
 
 static float adc_to_voltage(int16_t raw) {
   return ((float)raw * BTM_ADS_FS_VOLTS) / 32768.0f;
@@ -142,6 +143,14 @@ static void sample_all_channels() {
 }
 
 static void print_table() {
+  g_cycle_count++;
+  Serial.printf("cycle=%lu uptime_ms=%lu\n", (unsigned long)g_cycle_count, (unsigned long)millis());
+
+  // Reprint header periodically to keep long serial logs readable.
+  if ((g_cycle_count % 10U) == 1U) {
+    print_table_header();
+  }
+
   for (uint8_t idx = 0; idx < BTM_CHANNEL_COUNT; idx++) {
     const uint8_t dev = idx / BTM_CHANNELS_PER_ADS;
     const uint8_t ain = idx % BTM_CHANNELS_PER_ADS;

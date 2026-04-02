@@ -6,7 +6,7 @@ This setup note is written for first bring-up tomorrow with:
 - CH340C USB-UART bridge
 - Arduino board target: `ESP32 Dev Module`
 
-PlatformIO files are included in the repo, but this document assumes upload can be done in Arduino IDE.
+PlatformIO files are included in the repo. Arduino IDE is a practical bench fallback workflow for tomorrow if PlatformIO is not available on the test laptop.
 
 ## 1) Install Arduino IDE 2.x
 
@@ -72,6 +72,15 @@ Practical Arduino IDE method:
    - I2C pin/frequency line
    - ADS expected addresses line
    - ADS found count
+
+Example startup output (format may vary slightly):
+```text
+=== BTM BENCH TEST ===
+Board target: ESP32 Dev Module
+I2C: SDA=21 SCL=22 FREQ=100000 Hz
+ADS expected: 0x48 0x49 0x4A 0x4B | found=4
+Divider: VCC=3.300V R_FIXED=10000.0ohm
+```
 
 ## 9) Common Upload Problems
 
